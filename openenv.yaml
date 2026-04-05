@@ -1,0 +1,11 @@
+name: llm-debug-gym
+version: 1.0.0
+
+# Points to your core environment class inside the server folder
+env_class: server.environment.LLMDebugEnv
+
+# Maps the Pydantic models used for communication
+models:
+  action: models.DebugAction
+  observation: models.DebugObservation
+  state: openenv.core.State
