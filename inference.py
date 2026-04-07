@@ -2,14 +2,14 @@ import asyncio
 import os
 import textwrap
 from typing import List, Optional
-from types import SimpleNamespace # Added for clean object creation
+from types import SimpleNamespace 
 from dotenv import load_dotenv
 from openai import OpenAI
 from openenv.core.env_client import EnvClient
 from openenv.core import State
 from models import DebugAction, DebugObservation
 
-# 1. Load configuration from your .env
+# 1. Load configuration
 load_dotenv() 
 
 API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
@@ -23,7 +23,6 @@ class LLMDebugClient(EnvClient[DebugAction, DebugObservation, State]):
         return action.model_dump()
 
     def _parse_result(self, payload: dict):
-        # We return a SimpleNamespace instance instead of a class type
         return SimpleNamespace(
             observation=DebugObservation(**payload["observation"]),
             reward=payload.get("reward", 0.0),
@@ -33,7 +32,7 @@ class LLMDebugClient(EnvClient[DebugAction, DebugObservation, State]):
     def _parse_state(self, payload: dict) -> State:
         return State(**payload)
 
-# 3. Mandatory Logging Functions for Round 1
+# 3. Logging Functions
 def log_start(task: str, env: str, model: str) -> None:
     print(f"[START] task={task} env={env} model={model}", flush=True)
 
@@ -42,9 +41,10 @@ def log_step(step: int, action: str, reward: float, done: bool, error: Optional[
     done_val = str(done).lower()
     print(f"[STEP] step={step} action={action} reward={reward:.2f} done={done_val} error={error_val}", flush=True)
 
-def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> None:
+# FIXED: score is now int and print uses {score}
+def log_end(success: bool, steps: int, score: int, rewards: List[float]) -> None:
     rewards_str = ",".join(f"{r:.2f}" for r in rewards)
-    print(f"[END] success={str(success).lower()} steps={steps} score={score:.3f} rewards={rewards_str}", flush=True)
+    print(f"[END] success={str(success).lower()} steps={steps} score={score} rewards={rewards_str}", flush=True)
 
 def parse_llm_response(text: str):
     text = text.strip()
@@ -58,12 +58,11 @@ def parse_llm_response(text: str):
 
 async def main() -> None:
     if not HF_TOKEN:
-        print("Error: HF_TOKEN not found. Check your .env file.")
+        print("Error: HF_TOKEN not found.")
         return
 
     ai_client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
     
-    # 4. Use the locally defined client
     print(f"DEBUG: Attempting to connect to -> {ENV_URL}")
     with LLMDebugClient(base_url=ENV_URL).sync() as env:
         
@@ -74,7 +73,6 @@ async def main() -> None:
         log_start(task="debug-challenge", env="llm-debug-gym", model=MODEL_NAME)
 
         try:
-            # env.reset() now returns our SimpleNamespace result
             res = env.reset()
             current_feedback = res.observation.feedback
 
@@ -88,7 +86,6 @@ async def main() -> None:
                 )
                 cmd, code = parse_llm_response(completion.choices[0].message.content or "")
 
-                # Send action and get result
                 res = env.step(DebugAction(command=cmd, content=code))
                 
                 rewards.append(res.reward)
@@ -102,10 +99,10 @@ async def main() -> None:
                     break
 
         except Exception as e:
-            # This logs the error without crashing the script, so log_end still runs
             print(f"Error: {e}")
         finally:
-            log_end(success=success, steps=steps_taken, score=1.0 if success else 0.0, rewards=rewards)
+            # FIXED: Passing int values 1 or 0
+            log_end(success=success, steps=steps_taken, score=1 if success else 0, rewards=rewards)
 
 if __name__ == "__main__":
     asyncio.run(main())
