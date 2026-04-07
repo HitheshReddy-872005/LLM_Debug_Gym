@@ -1,0 +1,7 @@
+python-dotenv
+fastapi
+uvicorn
+gradio
+pydantic
+requests
+huggingface_hub
