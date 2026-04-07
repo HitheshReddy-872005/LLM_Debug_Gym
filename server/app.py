@@ -143,9 +143,10 @@ async def websocket_endpoint(websocket: WebSocket):
                     "type": "reset",
                     "data": {
                         "observation": jsonable_encoder(obs),
-                        "reward": 0.0,
+                        "reward": 0.01,
                         "done": False,
-                        "info": {}
+                        # 🛠️ THE FIX: Add the task_id here so the Validator can count tasks
+                        "info": {"task_id": f"task_{env.current_task_index}"}
                     }
                 })
             
@@ -166,7 +167,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 obs, reward, done, info = parse_env_step(raw_result)
                 update_ui_state(obs, is_reset=False)
 
-                # 🛠️ THE FIX: Only log a Pass/Fail result if the action was TEST
+                # 🛠️ Only log a Pass/Fail result if the action was TEST
                 if action.command == "TEST":
                     if done:
                         status = "✅ SUCCESS"
@@ -210,7 +211,16 @@ async def reset():
     add_log("🔄 REST Environment Reset.")
     obs = env.reset()
     update_ui_state(obs, is_reset=True)
-    return {"observation": jsonable_encoder(obs), "reward": 0.0, "done": False}
+    
+    # 🛠️ THE FIX: Add the task_id here so the Validator can count tasks
+    info = {"task_id": f"task_{env.current_task_index}"}
+    
+    return {
+        "observation": jsonable_encoder(obs), 
+        "reward": 0.01, 
+        "done": False, 
+        "info": info
+    }
 
 @app.post("/step")
 async def step(request: Request):
