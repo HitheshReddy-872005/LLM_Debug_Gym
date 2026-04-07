@@ -12,9 +12,12 @@ class LLMDebugEnv:
         self.current_task = DEBUG_TASKS[self.current_task_index]
         self.current_code = self.current_task['code']
         self.current_task_index = (self.current_task_index + 1) % len(DEBUG_TASKS)
+        
         return DebugObservation(
             feedback=f"TASK: {self.current_task['task']}\n\nCODE:\n{self.current_code}",
-            test_passed=False, reward=0.0, done=False,
+            test_passed=False, 
+            reward=0.01,  # ⚠️ CLAMPED: Must be > 0.0
+            done=False,
             metadata={"domain": self.current_task['domain'], "code": self.current_code} 
         )
 
@@ -23,7 +26,9 @@ class LLMDebugEnv:
             self.current_code = action.content
             return DebugObservation(
                 feedback="Code updated. Ready for testing.",
-                test_passed=False, reward=0.0, done=False,
+                test_passed=False, 
+                reward=0.01,  # ⚠️ CLAMPED: Must be > 0.0
+                done=False,
                 metadata={"domain": self.current_task['domain'], "code": self.current_code}
             )
             
@@ -42,14 +47,29 @@ class LLMDebugEnv:
                 except Exception as e:
                     error_feedback += f"\n- Test Failed: {test} ({type(e).__name__})"
 
-            # Calculate fractional reward (Shaped Reward)
-            reward = float(passed_count) / total_tests if total_tests > 0 else 0.0
-            test_passed = (reward == 1.0)
+            # Calculate fractional reward
+            raw_reward = float(passed_count) / total_tests if total_tests > 0 else 0.0
+            
+            # ⚠️ CRITICAL FIX: Clamp reward strictly between (0, 1) for the validator
+            reward = max(0.01, min(0.99, raw_reward))
+            
+            # The test is strictly passed only if all underlying tests pass
+            test_passed = (passed_count == total_tests and total_tests > 0)
 
             return DebugObservation(
                 feedback=f"Tests complete. Passed {passed_count}/{total_tests}.{error_feedback}",
                 test_passed=test_passed,
                 reward=reward,
                 done=True, # Episode ends after a TEST action
+                metadata={"domain": self.current_task['domain'], "code": self.current_code}
+            )
+            
+        # Fallback to prevent returning None on invalid actions
+        else:
+            return DebugObservation(
+                feedback=f"Invalid action command: '{action.command}'. Must be 'WRITE' or 'TEST'.",
+                test_passed=False, 
+                reward=0.01,  # ⚠️ CLAMPED: Must be > 0.0
+                done=False,
                 metadata={"domain": self.current_task['domain'], "code": self.current_code}
             )
