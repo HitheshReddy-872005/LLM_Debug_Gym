@@ -16,7 +16,7 @@ class LLMDebugEnv:
         return DebugObservation(
             feedback=f"TASK: {self.current_task['task']}\n\nCODE:\n{self.current_code}",
             test_passed=False, 
-            reward=0.01,  # ⚠️ CLAMPED: Must be > 0.0
+            reward=0.01,  
             done=False,
             metadata={"domain": self.current_task['domain'], "code": self.current_code} 
         )
@@ -27,7 +27,7 @@ class LLMDebugEnv:
             return DebugObservation(
                 feedback="Code updated. Ready for testing.",
                 test_passed=False, 
-                reward=0.01,  # ⚠️ CLAMPED: Must be > 0.0
+                reward=0.01,  
                 done=False,
                 metadata={"domain": self.current_task['domain'], "code": self.current_code}
             )
@@ -45,31 +45,38 @@ class LLMDebugEnv:
                     exec(full_script, {}, exec_scope)
                     passed_count += 1
                 except Exception as e:
-                    error_feedback += f"\n- Test Failed: {test} ({type(e).__name__})"
+                    # Feed the exact error back to the AI so it can learn
+                    error_feedback += f"\n- FAILED: {test} -> {type(e).__name__}: {str(e)}"
 
-            # Calculate fractional reward
+            # Calculate fractional reward and clamp it for the validator
             raw_reward = float(passed_count) / total_tests if total_tests > 0 else 0.0
-            
-            # ⚠️ CRITICAL FIX: Clamp reward strictly between (0, 1) for the validator
             reward = max(0.01, min(0.99, raw_reward))
             
-            # The test is strictly passed only if all underlying tests pass
+            # Strict pass check
             test_passed = (passed_count == total_tests and total_tests > 0)
 
+            # THE GRADUAL LEARNING FIX: 
+            # Only end the environment episode if the AI got a perfect score.
+            is_done = test_passed 
+
+            if test_passed:
+                final_feedback = f"SUCCESS! All {total_tests} tests passed."
+            else:
+                final_feedback = f"Partial Success. Passed {passed_count}/{total_tests} tests. Fix the following errors and try again:{error_feedback}"
+
             return DebugObservation(
-                feedback=f"Tests complete. Passed {passed_count}/{total_tests}.{error_feedback}",
+                feedback=final_feedback,
                 test_passed=test_passed,
                 reward=reward,
-                done=True, # Episode ends after a TEST action
+                done=is_done, 
                 metadata={"domain": self.current_task['domain'], "code": self.current_code}
             )
             
-        # Fallback to prevent returning None on invalid actions
         else:
             return DebugObservation(
-                feedback=f"Invalid action command: '{action.command}'. Must be 'WRITE' or 'TEST'.",
+                feedback=f"Invalid action command. Must be 'WRITE' or 'TEST'.",
                 test_passed=False, 
-                reward=0.01,  # ⚠️ CLAMPED: Must be > 0.0
+                reward=0.01,  
                 done=False,
                 metadata={"domain": self.current_task['domain'], "code": self.current_code}
             )
