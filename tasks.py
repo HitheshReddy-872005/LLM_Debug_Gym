@@ -1,5 +1,3 @@
-# server/tasks.py
-
 DEBUG_TASKS = {
     "task_easy": {
         "task": "Fix the syntax error: missing closing quote on the dictionary key.",
