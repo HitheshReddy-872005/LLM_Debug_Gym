@@ -166,11 +166,20 @@ async def websocket_endpoint(websocket: WebSocket):
                 obs, reward, done, info = parse_env_step(raw_result)
                 update_ui_state(obs, is_reset=False)
 
-                status = "✅ SUCCESS" if reward > 0 else "❌ FAILED"
-                add_log(f"📊 Result: {status} | Reward: {reward}")
+                # 🛠️ THE FIX: Only log a Pass/Fail result if the action was TEST
+                if action.command == "TEST":
+                    if done:
+                        status = "✅ SUCCESS"
+                    elif reward > 0.05: # Greater than clamped minimum
+                        status = "🔄 PARTIAL"
+                    else:
+                        status = "❌ FAILED"
+                    add_log(f"📊 Result: {status} | Reward: {reward:.2f}")
+                elif action.command == "WRITE":
+                    add_log("💾 Code saved to environment (Pending TEST)")
                 
-                # The Victory Banner
-                if reward > 0:
+                # The Victory Banner (Only appended if completely done)
+                if done and "✅ TASK IS SUCCESSFUL" not in current_ui_state["task"]:
                     current_ui_state["task"] = f"✅ TASK IS SUCCESSFUL! The AI solved the challenge.\n\n---\n\n{current_ui_state['task']}"
                 
                 await websocket.send_json({
@@ -214,7 +223,8 @@ async def step(request: Request):
     obs, reward, done, info = parse_env_step(raw_result)
     update_ui_state(obs, is_reset=False)
     
-    if reward > 0:
+    # The Victory Banner (Only appended if completely done)
+    if done and "✅ TASK IS SUCCESSFUL" not in current_ui_state["task"]:
         current_ui_state["task"] = f"✅ TASK IS SUCCESSFUL! The AI solved the challenge.\n\n---\n\n{current_ui_state['task']}"
         
     return {"observation": jsonable_encoder(obs), "reward": reward, "done": done, "info": jsonable_encoder(info)}
