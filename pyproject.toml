@@ -1,0 +1,26 @@
+[project]
+name = "llm-debug-gym"
+version = "0.1.0"
+description = "A professional-grade RL environment for LLM debugging tasks"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "openenv-core>=0.2.3",
+    "fastapi",
+    "uvicorn",
+    "pydantic",
+    "python-dotenv",
+    "openai",
+    "requests",
+    "huggingface_hub",
+    "gradio",
+    "websockets",
+    "httpx"
+]
+
+[project.scripts]
+server = "server.app:main"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
