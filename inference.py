@@ -1,5 +1,6 @@
 import asyncio
 import os
+import re
 import textwrap
 from typing import List, Optional
 from types import SimpleNamespace 
@@ -44,8 +45,15 @@ def log_step(step: int, action: str, reward: float, done: bool, error: Optional[
 
 def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> None:
     rewards_str = ",".join(f"{r:.2f}" for r in rewards)
-    # score is now formatted as a float (e.g., 0.75) to pass shaped reward checks
-    print(f"[END] success={str(success).lower()} steps={steps} score={score:.2f} rewards={rewards_str}", flush=True)
+    
+    # Ensure score is strictly between 0 and 1 to pass shaped reward checks
+    clamped_score = score
+    if clamped_score >= 1.0:
+        clamped_score = 0.99
+    elif clamped_score <= 0.0:
+        clamped_score = 0.01
+        
+    print(f"[END] success={str(success).lower()} steps={steps} score={clamped_score:.3f} rewards={rewards_str}", flush=True)
 
 def parse_llm_response(text: str):
     text = text.strip()
@@ -54,6 +62,17 @@ def parse_llm_response(text: str):
     if "ACTION: WRITE" in text.upper():
         parts = text.split("CODE:")
         code = parts[-1].strip() if len(parts) > 1 else ""
+        
+        # UI-Safe markdown backtick stripping
+        ticks = "`" * 3
+        if ticks in code:
+            pattern = ticks + r"(?:python)?\n?(.*?)\n?" + ticks
+            match = re.search(pattern, code, re.DOTALL)
+            if match:
+                code = match.group(1).strip()
+            else:
+                code = code.replace(ticks + "python", "").replace(ticks, "").strip()
+                
         return "WRITE", code
     return "TEST", "" 
 
@@ -109,7 +128,7 @@ async def main() -> None:
         except Exception as e:
             print(f"Error during execution: {e}")
         finally:
-            # Capture the final reward as the score (e.g., 0.66 for partial credit)
+            # Capture the final reward as the score (clamped in log_end)
             final_score = rewards[-1] if rewards else 0.0
             log_end(success=success, steps=steps_taken, score=final_score, rewards=rewards)
 
