@@ -67,6 +67,10 @@ ENV_URL="http://localhost:8000"
 ---
 
 ## 💻 Execution Guide
+1. **execute the requirements.txt file:**:
+```bash
+    uv install -r requirements.txt
+```
 
 ### Mode A: Local Development
 To run the system on your local machine without Docker:
