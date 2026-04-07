@@ -1,5 +1,16 @@
 DEBUG_TASKS = [
     {
+        "domain": "Logic Traps",
+        "task": "The function should add two inputs together. It currently fails some hidden edge cases.",
+        "code": "def add_things(a, b):\n    return a + b",
+        "test_cases": [
+            "assert add_things(2, 2) == 4, 'Failed basic addition'",
+            "assert add_things(-1, 1) == 0, 'Failed negative addition'",
+            "assert add_things('2', '2') == 4, 'Failed string integer cast'", 
+            "import math; assert math.isclose(add_things(0.1, 0.2), 0.3), 'Failed floating point precision'"
+        ]
+    },
+    {
         "domain": "Algorithms",
         "task": "Fix the binary search. It loops infinitely if the target is not in the array.",
         "code": "def binary_search(arr, target):\n    low, high = 0, len(arr) - 1\n    while low <= high:\n        mid = (low + high) // 2\n        if arr[mid] == target: return mid\n        elif arr[mid] < target: low = mid\n        else: high = mid\n    return -1",
