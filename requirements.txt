@@ -1,7 +1,11 @@
-python-dotenv
+openenv-core>=0.2.3
 fastapi
 uvicorn
 gradio
 pydantic
+python-dotenv
+openai
 requests
 huggingface_hub
+websockets
+httpx
