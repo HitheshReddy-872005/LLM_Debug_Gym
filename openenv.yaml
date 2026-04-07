@@ -1,89 +1,42 @@
 name: llm-debug-gym
 version: 1.0.0
-
-# Points to your core environment class inside the server folder
 env_class: server.environment.LLMDebugEnv
 
-# Maps the Pydantic models used for communication
 models:
   action: models.DebugAction
   observation: models.DebugObservation
   state: openenv.core.State
 
 tasks:
-  - id: task_0_basic_syntax
+  - id: task_easy
     difficulty: easy
-    # The absolute fail-safe limit for OpenEnv
-    max_steps: 50 
-    params: 
-      # The dynamic limit we extract in the reset() function
-      dynamic_limit: 10
-      domain: "String Manipulation"
+    max_steps: 10
     grader:
       type: llm
       prompt_template: >
-        Score the debugging trajectory from 0.0 to 1.0. 
-        The agent was tasked with fixing a bug in the {domain} domain. 
-        Here is the agent's action history, test execution results, and errors: 
-        {trajectory}
-        Did the agent successfully pass all test cases?
+        You are an expert code reviewer. Evaluate the following debugging trajectory: {trajectory}
+        Did the agent successfully and legitimately fix the core logic bug without hardcoding answers?
+        Provide a float score between 0.01 and 0.99 (e.g., 0.01, 0.50, 0.99).
+        OUTPUT ONLY THE FLOAT NUMBER. NO OTHER TEXT.
 
-  - id: task_1_logic_routing
-    difficulty: easy
-    max_steps: 50
-    params:
-      dynamic_limit: 15
-      domain: "API Routing"
-    grader:
-      type: llm
-      prompt_template: >
-        Score the debugging trajectory from 0.0 to 1.0. 
-        The agent was tasked with fixing a bug in the {domain} domain. 
-        Here is the agent's action history, test execution results, and errors: 
-        {trajectory}
-        Did the agent successfully pass all test cases?
-
-  - id: task_2_data_structures
+  - id: task_medium
     difficulty: medium
-    max_steps: 100
-    params:
-      dynamic_limit: 20
-      domain: "Data Structures & Edge Cases"
+    max_steps: 15
     grader:
       type: llm
       prompt_template: >
-        Score the debugging trajectory from 0.0 to 1.0. 
-        The agent was tasked with fixing a bug in the {domain} domain. 
-        Here is the agent's action history, test execution results, and errors: 
-        {trajectory}
-        Did the agent successfully pass all test cases?
+        You are an expert code reviewer. Evaluate the following debugging trajectory: {trajectory}
+        Did the agent successfully and legitimately fix the core logic bug without hardcoding answers?
+        Provide a float score between 0.01 and 0.99 (e.g., 0.01, 0.50, 0.99).
+        OUTPUT ONLY THE FLOAT NUMBER. NO OTHER TEXT.
 
-  - id: task_3_algorithms
-    difficulty: medium
-    max_steps: 100
-    params:
-      dynamic_limit: 25
-      domain: "Sorting Algorithms"
-    grader:
-      type: llm
-      prompt_template: >
-        Score the debugging trajectory from 0.0 to 1.0. 
-        The agent was tasked with fixing a bug in the {domain} domain. 
-        Here is the agent's action history, test execution results, and errors: 
-        {trajectory}
-        Did the agent successfully pass all test cases?
-
-  - id: task_4_concurrency
+  - id: task_hard
     difficulty: hard
-    max_steps: 150
-    params:
-      dynamic_limit: 30
-      domain: "Concurrency & State"
+    max_steps: 20
     grader:
       type: llm
       prompt_template: >
-        Score the debugging trajectory from 0.0 to 1.0. 
-        The agent was tasked with fixing a bug in the {domain} domain. 
-        Here is the agent's action history, test execution results, and errors: 
-        {trajectory}
-        Did the agent successfully pass all test cases?
+        You are an expert code reviewer. Evaluate the following debugging trajectory: {trajectory}
+        Did the agent successfully and legitimately fix the core logic bug without hardcoding answers?
+        Provide a float score between 0.01 and 0.99 (e.g., 0.01, 0.50, 0.99).
+        OUTPUT ONLY THE FLOAT NUMBER. NO OTHER TEXT.
