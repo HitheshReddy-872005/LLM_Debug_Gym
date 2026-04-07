@@ -9,3 +9,81 @@ models:
   action: models.DebugAction
   observation: models.DebugObservation
   state: openenv.core.State
+
+tasks:
+  - id: task_0_basic_syntax
+    difficulty: easy
+    # The absolute fail-safe limit for OpenEnv
+    max_steps: 50 
+    params: 
+      # The dynamic limit we extract in the reset() function
+      dynamic_limit: 10
+      domain: "String Manipulation"
+    grader:
+      type: llm
+      prompt_template: >
+        Score the debugging trajectory from 0.0 to 1.0. 
+        The agent was tasked with fixing a bug in the {domain} domain. 
+        Here is the agent's action history, test execution results, and errors: 
+        {trajectory}
+        Did the agent successfully pass all test cases?
+
+  - id: task_1_logic_routing
+    difficulty: easy
+    max_steps: 50
+    params:
+      dynamic_limit: 15
+      domain: "API Routing"
+    grader:
+      type: llm
+      prompt_template: >
+        Score the debugging trajectory from 0.0 to 1.0. 
+        The agent was tasked with fixing a bug in the {domain} domain. 
+        Here is the agent's action history, test execution results, and errors: 
+        {trajectory}
+        Did the agent successfully pass all test cases?
+
+  - id: task_2_data_structures
+    difficulty: medium
+    max_steps: 100
+    params:
+      dynamic_limit: 20
+      domain: "Data Structures & Edge Cases"
+    grader:
+      type: llm
+      prompt_template: >
+        Score the debugging trajectory from 0.0 to 1.0. 
+        The agent was tasked with fixing a bug in the {domain} domain. 
+        Here is the agent's action history, test execution results, and errors: 
+        {trajectory}
+        Did the agent successfully pass all test cases?
+
+  - id: task_3_algorithms
+    difficulty: medium
+    max_steps: 100
+    params:
+      dynamic_limit: 25
+      domain: "Sorting Algorithms"
+    grader:
+      type: llm
+      prompt_template: >
+        Score the debugging trajectory from 0.0 to 1.0. 
+        The agent was tasked with fixing a bug in the {domain} domain. 
+        Here is the agent's action history, test execution results, and errors: 
+        {trajectory}
+        Did the agent successfully pass all test cases?
+
+  - id: task_4_concurrency
+    difficulty: hard
+    max_steps: 150
+    params:
+      dynamic_limit: 30
+      domain: "Concurrency & State"
+    grader:
+      type: llm
+      prompt_template: >
+        Score the debugging trajectory from 0.0 to 1.0. 
+        The agent was tasked with fixing a bug in the {domain} domain. 
+        Here is the agent's action history, test execution results, and errors: 
+        {trajectory}
+        Did the agent successfully pass all test cases?
