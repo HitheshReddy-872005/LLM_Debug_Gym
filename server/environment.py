@@ -1,3 +1,5 @@
+# server/environment.py
+
 import traceback
 from typing import Dict, Any
 from models import DebugObservation, DebugAction
@@ -5,9 +7,10 @@ from tasks import DEBUG_TASKS
 
 class LLMDebugEnv:
     def __init__(self):
-        self.current_task_index = 0          
+        self.current_task_id = "task_easy"          
         self.current_task = None
         self.current_code = ""
+        
         self.current_step = 0
         self.dynamic_max_steps = 10 
         self.history_log = []
@@ -17,26 +20,26 @@ class LLMDebugEnv:
         self.history_log = []
         task_params = task_params or {}
         
-        # Pull limits from YAML params
-        self.dynamic_max_steps = task_params.get("dynamic_limit", 10)
+        # Default to task_easy if not provided
+        self.current_task_id = task_params.get("task_id", "task_easy")
 
-        # Load task
-        self.current_task = DEBUG_TASKS[self.current_task_index]
+        # Load task safely
+        self.current_task = DEBUG_TASKS.get(self.current_task_id, DEBUG_TASKS["task_easy"])
         self.current_code = self.current_task['code']
-        self.current_task_index = (self.current_task_index + 1) % len(DEBUG_TASKS)
+        self.dynamic_max_steps = self.current_task.get("max_steps", 10)
                 
         feedback = f"TASK: {self.current_task['task']}\n\nCODE:\n{self.current_code}"
         
-        self.history_log.append(f"--- STARTING DEBUG SESSION | Domain: {self.current_task['domain']} ---")
+        # Removed the domain reference here
+        self.history_log.append(f"--- STARTING DEBUG SESSION | {self.current_task_id} ---")
         self.history_log.append(f"Initial State:\n{feedback}")
 
         return DebugObservation(
             feedback=feedback,
             test_passed=False, 
-            reward=0.01,
+            reward=0.0,
             done=False,
             metadata={
-                "domain": self.current_task['domain'], 
                 "code": self.current_code,
                 "trajectory": "\n".join(self.history_log)
             } 
@@ -46,7 +49,7 @@ class LLMDebugEnv:
         self.current_step += 1
         self.history_log.append(f"[Step {self.current_step}] Action: {action.command}")
         
-        reward = 0.01
+        reward = 0.0
         is_done = False
         final_feedback = ""
         test_passed = False
@@ -70,26 +73,25 @@ class LLMDebugEnv:
                 except Exception as e:
                     error_feedback += f"\n- FAILED: {test} -> {type(e).__name__}: {str(e)}"
             
-            # Dynamic reward calculation
-            raw_reward = float(passed_count) / total_tests if total_tests > 0 else 0.0
-            reward = max(0.01, min(0.99, raw_reward))
+            # Pure fractional math
+            reward = float(passed_count) / total_tests if total_tests > 0 else 0.0
                         
             test_passed = (passed_count == total_tests and total_tests > 0)
             is_done = test_passed 
             
             if test_passed:
-                reward = 0.99
                 final_feedback = f"SUCCESS! All {total_tests} tests passed."
             else:
                 final_feedback = f"Partial Success. Passed {passed_count}/{total_tests} tests. Errors:{error_feedback}"
+                    
         else:
-            final_feedback = f"Invalid action command."
+            final_feedback = f"Invalid action command. Must be 'WRITE' or 'TEST'."
 
         self.history_log.append(f"[Step {self.current_step}] Observation: {final_feedback}")
 
         if not is_done and self.current_step >= self.dynamic_max_steps:
             is_done = True
-            self.history_log.append("STATUS: Max steps reached.")
+            self.history_log.append("STATUS: Maximum steps reached. Terminating early.")
 
         return DebugObservation(
             feedback=final_feedback,
@@ -97,7 +99,6 @@ class LLMDebugEnv:
             reward=reward,
             done=is_done, 
             metadata={
-                "domain": self.current_task['domain'], 
                 "code": self.current_code,
                 "trajectory": "\n".join(self.history_log)
             }
