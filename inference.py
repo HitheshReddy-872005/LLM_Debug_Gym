@@ -23,6 +23,7 @@ class LLMDebugClient(EnvClient[DebugAction, DebugObservation, State]):
         return action.model_dump()
 
     def _parse_result(self, payload: dict):
+        # Maps the server response to a namespace for dot-notation access
         return SimpleNamespace(
             observation=DebugObservation(**payload["observation"]),
             reward=payload.get("reward", 0.0),
@@ -32,7 +33,7 @@ class LLMDebugClient(EnvClient[DebugAction, DebugObservation, State]):
     def _parse_state(self, payload: dict) -> State:
         return State(**payload)
 
-# 3. Logging Functions
+# 3. Logging Functions (Strictly formatted for Validator Round 1)
 def log_start(task: str, env: str, model: str) -> None:
     print(f"[START] task={task} env={env} model={model}", flush=True)
 
@@ -41,10 +42,10 @@ def log_step(step: int, action: str, reward: float, done: bool, error: Optional[
     done_val = str(done).lower()
     print(f"[STEP] step={step} action={action} reward={reward:.2f} done={done_val} error={error_val}", flush=True)
 
-# FIXED: score is now int and print uses {score}
-def log_end(success: bool, steps: int, score: int, rewards: List[float]) -> None:
+def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> None:
     rewards_str = ",".join(f"{r:.2f}" for r in rewards)
-    print(f"[END] success={str(success).lower()} steps={steps} score={score} rewards={rewards_str}", flush=True)
+    # score is now formatted as a float (e.g., 0.75) to pass shaped reward checks
+    print(f"[END] success={str(success).lower()} steps={steps} score={score:.2f} rewards={rewards_str}", flush=True)
 
 def parse_llm_response(text: str):
     text = text.strip()
@@ -58,12 +59,14 @@ def parse_llm_response(text: str):
 
 async def main() -> None:
     if not HF_TOKEN:
-        print("Error: HF_TOKEN not found.")
+        print("Error: HF_TOKEN not found. Check your secrets or .env file.")
         return
 
     ai_client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
     
     print(f"DEBUG: Attempting to connect to -> {ENV_URL}")
+    
+    # Initialize the client with the provided environment URL
     with LLMDebugClient(base_url=ENV_URL).sync() as env:
         
         rewards: List[float] = []
@@ -73,10 +76,12 @@ async def main() -> None:
         log_start(task="debug-challenge", env="llm-debug-gym", model=MODEL_NAME)
 
         try:
+            # Start the episode
             res = env.reset()
             current_feedback = res.observation.feedback
 
             for step in range(1, 11):
+                # Prompt the LLM for a fix based on current environment feedback
                 completion = ai_client.chat.completions.create(
                     model=MODEL_NAME,
                     messages=[
@@ -84,14 +89,17 @@ async def main() -> None:
                         {"role": "user", "content": f"Feedback: {current_feedback}"},
                     ]
                 )
+                
                 cmd, code = parse_llm_response(completion.choices[0].message.content or "")
 
+                # Execute the step in the environment
                 res = env.step(DebugAction(command=cmd, content=code))
                 
                 rewards.append(res.reward)
                 steps_taken = step
                 current_feedback = res.observation.feedback
                 
+                # Log progress for the validator
                 log_step(step=step, action=cmd, reward=res.reward, done=res.done, error=None)
 
                 if res.done:
@@ -99,10 +107,11 @@ async def main() -> None:
                     break
 
         except Exception as e:
-            print(f"Error: {e}")
+            print(f"Error during execution: {e}")
         finally:
-            # FIXED: Passing int values 1 or 0
-            log_end(success=success, steps=steps_taken, score=1 if success else 0, rewards=rewards)
+            # Capture the final reward as the score (e.g., 0.66 for partial credit)
+            final_score = rewards[-1] if rewards else 0.0
+            log_end(success=success, steps=steps_taken, score=final_score, rewards=rewards)
 
 if __name__ == "__main__":
     asyncio.run(main())
