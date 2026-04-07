@@ -9,6 +9,7 @@ pinned: false
 license: mit
 short_description: An OpenEnv-compliant RL gym for automated LLM debugging
 ---
+
 # 🤖 LLM Debug Gym
 
 **LLM Debug Gym** is a professional-grade Reinforcement Learning (RL) environment designed for training and evaluating Large Language Models (LLMs) on code debugging tasks. Built on the **OpenEnv** framework, it provides a stateful interface where an AI agent interacts with a buggy codebase, performs edits, and runs tests to verify its fixes in real-time.
@@ -43,12 +44,13 @@ To run this project, ensure you have the following installed:
 ## 🚀 Step-by-Step Setup
 
 ### 1. Project Initialization
-Clone the repository and install the synchronized virtual environment using `uv`:
+Clone the repository and install the dependencies using `pip`:
 ```bash
 git clone <your-repo-url>
 cd LLM_debug_gym
-# Install all dependencies and lock the environment
-uv sync
+
+# Install all dependencies 
+pip install -r requirements.txt
 ```
 
 ### 2. Environment Configuration
@@ -56,8 +58,10 @@ Create a file named `.env` in the root directory. This allows the agent to authe
 ```env
 # Your Hugging Face Access Token
 HF_TOKEN="your_hf_token_here"
+
 # The LLM model used for debugging
 MODEL_NAME="Qwen/Qwen2.5-72B-Instruct"
+
 # Server URL:
 # Use http://localhost:8000 for local development
 # Use your https://<name>.hf.space for cloud/Space deployment
@@ -67,21 +71,17 @@ ENV_URL="http://localhost:8000"
 ---
 
 ## 💻 Execution Guide
-**Run the requirements.txt file to install required dependencies:**
-```bash
-    uv install -r requirements.txt
-```
 
 ### Mode A: Local Development
 To run the system on your local machine without Docker:
 
 1. **Start the Server**:
 ```bash
-    uv run server
+    python -m server.app
 ```
 2. **Run the Agent** (in a separate terminal):
 ```bash
-    uv run python inference.py
+    python inference.py
 ```
 
 ### Mode B: Docker Deployment (Production)
@@ -110,7 +110,7 @@ We follow a modular Python package structure to ensure strictly compliant import
 - **`tasks.py`**: A library of buggy Python functions and corresponding hidden test cases.
 - **`inference.py`**: The agent logic that handles LLM prompting and API communication.
 - **`Dockerfile`**: Configuration for the Python 3.12-slim production container.
-- **`pyproject.toml`**: Metadata and dependency management, including the `server` entry point.
+- **`requirements.txt`**: List of dependencies for standard pip installation.
 
 ---
 
@@ -118,7 +118,6 @@ We follow a modular Python package structure to ensure strictly compliant import
 This project is licensed under the MIT License.
 
 ---
-
 ## 📬 Contact & Collaboration
 
 Created by **Hithesh Reddy**. I am a CSE student passionate about AI Safety and NLP.
@@ -127,3 +126,5 @@ Created by **Hithesh Reddy**. I am a CSE student passionate about AI Safety and 
 * **LinkedIn:** [https://www.linkedin.com/in/hitheshreddys/]
 
 *Currently open to research internships and AI/ML collaborations!*
+
+Check out the configuration reference at https://huggingface.co/docs/hub/spaces-config-reference
