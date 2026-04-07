@@ -45,7 +45,7 @@ To run this project, ensure you have the following installed:
 ### 1. Project Initialization
 Clone the repository and install the dependencies using `pip`:
 ```bash
-git clone <your-repo-url>
+git clone https://github.com/HitheshReddy-872005/LLM_Debug_Gym.git
 cd LLM_debug_gym
 
 # Install all dependencies 
