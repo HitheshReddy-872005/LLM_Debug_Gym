@@ -16,7 +16,8 @@ load_dotenv()
 API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
 MODEL_NAME = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
 HF_TOKEN = os.getenv("HF_TOKEN")
-ENV_URL = os.getenv("ENV_URL", "https://hitheshreddy-llm-debug-gym.hf.space") 
+# Default to localhost to prevent proxy timeouts during LLM generations
+ENV_URL = os.getenv("ENV_URL", "http://localhost:8000") 
 
 # 2. Concrete Client Implementation
 class LLMDebugClient(EnvClient[DebugAction, DebugObservation, State]):
@@ -45,18 +46,19 @@ def log_step(step: int, action: str, reward: float, done: bool, error: Optional[
 def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> None:
     rewards_str = ",".join(f"{r:.2f}" for r in rewards)
     
-    # Final layer of safety for the log output
+    # Final layer of safety for the log output to keep it strictly (0, 1)
     clamped_score = max(0.01, min(0.99, score))
         
     print(f"[END] success={str(success).lower()} steps={steps} score={clamped_score:.3f} rewards={rewards_str}", flush=True)
 
 def parse_llm_response(text: str):
-    text = text.strip()
-    if "ACTION: TEST" in text.upper():
-        return "TEST", ""
-    if "ACTION: WRITE" in text.upper():
-        parts = text.split("CODE:")
-        code = parts[-1].strip() if len(parts) > 1 else ""
+    text_upper = text.upper()
+    
+    # 1. Prioritize WRITE. If the LLM wrote code, we must capture it!
+    if "ACTION: WRITE" in text_upper:
+        # Split using the original text to preserve case sensitivity in the code
+        parts = re.split(r"CODE:\s*", text, flags=re.IGNORECASE)
+        code = parts[-1].strip() if len(parts) > 1 else text
         
         # UI-Safe markdown backtick stripping
         ticks = "`" * 3
@@ -69,7 +71,19 @@ def parse_llm_response(text: str):
                 code = code.replace(ticks + "python", "").replace(ticks, "").strip()
                 
         return "WRITE", code
-    return "TEST", "" 
+
+    # 2. If it didn't write code, check if it wants to test
+    elif "ACTION: TEST" in text_upper:
+        return "TEST", ""
+        
+    # 3. Smart Fallback: If the LLM forgot the "ACTION:" keyword but still wrote a Python block
+    if "```python" in text.lower():
+        match = re.search(r"```python\n?(.*?)\n?```", text, flags=re.DOTALL | re.IGNORECASE)
+        if match:
+            return "WRITE", match.group(1).strip()
+
+    # 4. Ultimate fallback
+    return "TEST", ""
 
 async def main() -> None:
     if not HF_TOKEN:
@@ -95,7 +109,7 @@ async def main() -> None:
                 completion = ai_client.chat.completions.create(
                     model=MODEL_NAME,
                     messages=[
-                        {"role": "system", "content": "You are an expert Python debugger. Fix the code. Format: ACTION: <WRITE/TEST> CODE: <Full code if WRITE>"},
+                        {"role": "system", "content": "You are an expert Python debugger. Fix the code. Format: ACTION: WRITE CODE: <Full code if WRITE> or ACTION: TEST"},
                         {"role": "user", "content": f"Feedback: {current_feedback}"},
                     ]
                 )
