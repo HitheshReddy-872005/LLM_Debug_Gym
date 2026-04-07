@@ -1,61 +1,106 @@
+# server/tasks.py
+
 DEBUG_TASKS = [
     {
-        "domain": "Logic Traps",
-        "task": "The function should add two inputs together. It currently fails some hidden edge cases.",
-        "code": "def add_things(a, b):\n    return a + b",
+        # TASK 0: Basic Syntax Error
+        "domain": "String Manipulation",
+        "task": "Fix the syntax error in the log parsing function.",
+        "code": '''def parse_log(log_line):
+    parts = log_line.split(": ")
+    # BUG: Missing closing quote on the dictionary key
+    return {"level: parts[0], "msg": parts[1]}''',
         "test_cases": [
-            "assert add_things(2, 2) == 4, 'Failed basic addition'",
-            "assert add_things(-1, 1) == 0, 'Failed negative addition'",
-            "assert add_things('2', '2') == 4, 'Failed string integer cast'", 
-            "import math; assert math.isclose(add_things(0.1, 0.2), 0.3), 'Failed floating point precision'"
+            'assert parse_log("INFO: Server started") == {"level": "INFO", "msg": "Server started"}',
+            'assert parse_log("ERROR: Crash") == {"level": "ERROR", "msg": "Crash"}'
         ]
     },
+    
     {
-        "domain": "Algorithms",
-        "task": "Fix the binary search. It loops infinitely if the target is not in the array.",
-        "code": "def binary_search(arr, target):\n    low, high = 0, len(arr) - 1\n    while low <= high:\n        mid = (low + high) // 2\n        if arr[mid] == target: return mid\n        elif arr[mid] < target: low = mid\n        else: high = mid\n    return -1",
+        # TASK 1: Logic / Routing Error
+        "domain": "API Routing",
+        "task": "Fix the router logic so it returns the correct HTTP status codes. GET should be 200, POST should be 201, and everything else should be 405.",
+        "code": '''def handle_request(method):
+    if method == "GET":
+        return 200
+    elif method == "POST":
+        # BUG: Hardcoded wrong return type for POST
+        return 200
+    else:
+        return 405''',
         "test_cases": [
-            "assert binary_search([1, 2, 3, 4, 5], 3) == 2, 'Failed to find middle element'",
-            "assert binary_search([1, 2, 3, 4, 5], 1) == 0, 'Failed to find first element'",
-            "assert binary_search([1, 2, 3], 5) == -1, 'Failed to return -1 for missing element'"
+            'assert handle_request("GET") == 200',
+            'assert handle_request("POST") == 201',
+            'assert handle_request("DELETE") == 405'
         ]
     },
+
     {
-        "domain": "Algorithms",
-        "task": "Fix the Bubble Sort. It throws an IndexError on the last iteration.",
-        "code": "def bubble_sort(arr):\n    n = len(arr)\n    for i in range(n):\n        for j in range(0, n - i):\n            if arr[j] > arr[j+1]:\n                arr[j], arr[j+1] = arr[j+1], arr[j]\n    return arr",
+        # TASK 2: Data Structures & Edge Cases
+        "domain": "Data Structures & Edge Cases",
+        "task": "Fix the MessageBuffer so that calling pop() on an empty buffer returns None instead of throwing an IndexError.",
+        "code": '''class MessageBuffer:
+    def __init__(self):
+        self.buffer = []
+        
+    def push(self, msg):
+        self.buffer.append(msg)
+        
+    def pop(self):
+        # BUG: Does not check if buffer is empty before popping
+        return self.buffer.pop(0)''',
         "test_cases": [
-            "assert bubble_sort([3, 1, 4, 1, 5, 9, 2, 6]) == [1, 1, 2, 3, 4, 5, 6, 9], 'Sorting failed for unsorted array'",
-            "assert bubble_sort([1, 2, 3]) == [1, 2, 3], 'Sorting failed for already sorted array'",
-            "assert bubble_sort([]) == [], 'Failed on empty array'"
+            '''b = MessageBuffer()
+b.push("msg1")
+assert b.pop() == "msg1"''',
+            '''b = MessageBuffer()
+assert b.pop() is None  # This should not throw an error!'''
         ]
     },
+
     {
-        "domain": "Data Structures",
-        "task": "Fix the Valid Parentheses checker. It crashes if there are more closing brackets than opening ones.",
-        "code": "def is_valid(s):\n    stack = []\n    mapping = {')': '(', '}': '{', ']': '['}\n    for char in s:\n        if char in mapping:\n            top_element = stack.pop()\n            if mapping[char] != top_element: return False\n        else:\n            stack.append(char)\n    return not stack",
+        # TASK 3: Algorithms
+        "domain": "Sorting Algorithms",
+        "task": "Fix the sorting function so it correctly sorts a list of priority scores in DESCENDING order (highest first).",
+        "code": '''def sort_priorities(scores):
+    # BUG: Currently sorts in ascending order
+    n = len(scores)
+    for i in range(n):
+        for j in range(0, n-i-1):
+            if scores[j] > scores[j+1]:
+                scores[j], scores[j+1] = scores[j+1], scores[j]
+    return scores''',
         "test_cases": [
-            "assert is_valid('()[]{}') == True, 'Failed basic valid string'",
-            "assert is_valid('(]') == False, 'Failed mismatched brackets'",
-            "assert is_valid(']') == False, 'Failed on empty stack pop'"
+            'assert sort_priorities([10, 50, 20]) == [50, 20, 10]',
+            'assert sort_priorities([1, 2, 3, 4]) == [4, 3, 2, 1]'
         ]
     },
+
     {
-        "domain": "Algorithms",
-        "task": "Fix Kadane's Algorithm for Maximum Subarray Sum. It returns 0 if all numbers are negative.",
-        "code": "def max_subarray(nums):\n    max_so_far = 0\n    current_max = 0\n    for i in range(len(nums)):\n        current_max = current_max + nums[i]\n        if current_max < 0:\n            current_max = 0\n        elif max_so_far < current_max:\n            max_so_far = current_max\n    return max_so_far",
+        # TASK 4: Concurrency & State (Themed around Network Nodes)
+        "domain": "Concurrency & State",
+        "task": "Fix the NodeTracker so it correctly increments the heartbeat count for existing peers. Currently, it resets the count to 1 every time a heartbeat is received.",
+        "code": '''class NodeTracker:
+    def __init__(self):
+        self.active_nodes = {}
+        
+    def receive_heartbeat(self, node_id):
+        if node_id not in self.active_nodes:
+            self.active_nodes[node_id] = 1
+        else:
+            # BUG: Overwrites instead of incrementing
+            self.active_nodes[node_id] = 1
+            
+    def get_count(self, node_id):
+        return self.active_nodes.get(node_id, 0)''',
         "test_cases": [
-            "assert max_subarray([-2,1,-3,4,-1,2,1,-5,4]) == 6, 'Failed on mixed array'",
-            "assert max_subarray([-3, -5, -2]) == -2, 'Failed on all-negative array'"
-        ]
-    },
-    {
-        "domain": "Data Structures",
-        "task": "Fix the BFS traversal. It acts like DFS because it uses the wrong pop method on the list.",
-        "code": "def bfs(graph, start):\n    visited, queue = set(), [start]\n    visited.add(start)\n    while queue:\n        vertex = queue.pop()\n        for neighbor in graph[vertex]:\n            if neighbor not in visited:\n                visited.add(neighbor)\n                queue.append(neighbor)\n    return visited",
-        "test_cases": [
-            "graph = {1: [2, 3], 2: [4], 3: [], 4: []}\nassert type(bfs(graph, 1)) == set, 'Did not return a set'",
-            "graph = {1: [2], 2: []}\nassert 2 in bfs(graph, 1), 'Failed to visit neighbors'"
+            '''tracker = NodeTracker()
+tracker.receive_heartbeat("peer_A")
+assert tracker.get_count("peer_A") == 1''',
+            '''tracker = NodeTracker()
+tracker.receive_heartbeat("peer_B")
+tracker.receive_heartbeat("peer_B")
+tracker.receive_heartbeat("peer_B")
+assert tracker.get_count("peer_B") == 3  # Should have incremented to 3'''
         ]
     }
 ]
