@@ -67,7 +67,7 @@ ENV_URL="http://localhost:8000"
 ---
 
 ## 💻 Execution Guide
-1. **execute the requirements.txt file:**:
+**Run the requirements.txt file to install required dependencies:**
 ```bash
     uv install -r requirements.txt
 ```
