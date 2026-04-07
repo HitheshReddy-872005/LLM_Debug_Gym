@@ -35,7 +35,6 @@ The project utilizes a **Client-Server architecture** to isolate the evaluation 
 
 To run this project, ensure you have the following installed:
 - **Python 3.10+**
-- **[uv](https://github.com/astral-sh/uv)**: A high-performance Python package manager and resolver.
 - **Docker Desktop**: Required for building and running the containerized environment.
 - **Hugging Face API Token**: Required to access the LLM inference endpoints.
 
