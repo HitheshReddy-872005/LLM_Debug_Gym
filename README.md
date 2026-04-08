@@ -63,7 +63,7 @@ MODEL_NAME="Qwen/Qwen2.5-72B-Instruct"
 
 # Server URL:
 # Use http://localhost:8000 for local development
-# Use your https://<name>.hf.space for cloud/Space deployment
+# Use your https://HitheshReddy-llm-debug-gym.hf.space for cloud/Space deployment
 ENV_URL="http://localhost:8000"
 ```
 
