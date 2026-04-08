@@ -1,107 +1,90 @@
-import traceback
+import os
+import sys
 from typing import Dict, Any
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from tasks import DEBUG_TASKS
 from models import DebugObservation, DebugAction
-from tasks import DEBUG_TASKS 
 
 class LLMDebugEnv:
     def __init__(self):
-        self.current_task_id = "task_easy"
-        self.current_task_index = 0          
-        self.current_task = None
+        self.current_task_id = None
+        self.current_task = {}
         self.current_code = ""
-        
-        self.current_step = 0
-        self.dynamic_max_steps = 10 
-        self.history_log = []
-
-    def reset(self, task_params: Dict[str, Any] = None) -> DebugObservation:
         self.current_step = 0
         self.history_log = []
-        task_params = task_params or {}
+
+    def reset(self, options=None, **kwargs) -> DebugObservation:
+        self.current_step = 0
+        self.history_log = []
+        options = options or {}
         
-        self.current_task_id = task_params.get("task_id", "task_easy")
+        req_id = options.get("task_id") or os.environ.get("TASK_ID")
+        if not req_id: raise ValueError("FATAL: No TASK_ID provided.")
 
-        # Map string ID to index for Live Monitor UI
-        task_mapping = {"task_easy": 0, "task_medium": 1, "task_hard": 2}
-        self.current_task_index = task_mapping.get(self.current_task_id, 0)
-
-        self.current_task = DEBUG_TASKS.get(self.current_task_id, DEBUG_TASKS["task_easy"])
-        self.current_code = self.current_task['code']
-        self.dynamic_max_steps = self.current_task.get("max_steps", 10)
-                
-        feedback = f"TASK: {self.current_task['task']}\n\nCODE:\n{self.current_code}"
+        self.current_task_id = req_id
+        self.current_task = DEBUG_TASKS[self.current_task_id]
+        self.current_code = self.current_task.get('code', '')
         
-        self.history_log.append(f"--- STARTING DEBUG SESSION | {self.current_task_id} ---")
-        self.history_log.append(f"Initial State:\n{feedback}")
-
-        return DebugObservation(
-            feedback=feedback,
-            test_passed=False, 
-            reward=0.01,  # Strictly locked to minimum floor
-            done=False,
-            metadata={
-                "code": self.current_code,
-                "trajectory": "\n".join(self.history_log)
-            } 
-        )
+        feedback = f"TASK: {self.current_task.get('task')}\nCODE: {self.current_code}"
+        self.history_log.append(f"--- SESSION STARTED: {self.current_task_id} ---")
+        
+        return DebugObservation(feedback=feedback, test_passed=False, reward=0.1, done=False, metadata={"code": self.current_code, "task": self.current_task.get('task')})
 
     def step(self, action: DebugAction) -> DebugObservation:
         self.current_step += 1
-        self.history_log.append(f"[Step {self.current_step}] Action: {action.command}")
+        self.history_log.append(f"Step {self.current_step}: {action.command}")
         
-        reward = 0.01  # Strictly locked to minimum floor
-        is_done = False
+        reward, is_done, test_passed = 0.1, False, False
         final_feedback = ""
-        test_passed = False
 
         if action.command == "WRITE":
             self.current_code = action.content
-            final_feedback = "Code updated. Ready for testing."
+            final_feedback = "Code updated. Now reply with TEST to check it."
             
         elif action.command == "TEST":
+            exec_scope = {}
+            # 1. PRE-CHECK SYNTAX AND EXECUTE BASE FUNCTION
+            try:
+                compile(self.current_code, '<string>', 'exec')
+                exec(self.current_code, exec_scope)
+            except Exception as e:
+                final_feedback = f"CRITICAL ERROR: Code failed to compile or run.\n{type(e).__name__}: {str(e)}\n\nCURRENT CODE:\n{self.current_code}"
+                return DebugObservation(feedback=final_feedback, test_passed=False, reward=0.1, done=False, metadata={"code": self.current_code})
+            
+            # 2. RUN TEST CASES
             test_cases = self.current_task.get('test_cases', [])
             passed_count = 0
-            total_tests = len(test_cases)
-            error_feedback = ""
+            failed_logs = []
             
-            for test in test_cases:
+            for t in test_cases:
                 try:
-                    full_script = self.current_code + "\n\n" + test
-                    exec_scope = {}
-                    exec(full_script, {}, exec_scope)
+                    # Execute test against the already-compiled scope
+                    exec(t, exec_scope)
                     passed_count += 1
+                except AssertionError:
+                    failed_logs.append(f"Failed assertion: {t}")
                 except Exception as e:
-                    error_feedback += f"\n- FAILED: {test} -> {type(e).__name__}: {str(e)}"
+                    failed_logs.append(f"Crashed on {t}: {type(e).__name__} - {str(e)}")
             
-            # Mathematical clamping
-            raw_reward = float(passed_count) / total_tests if total_tests > 0 else 0.0
-            reward = max(0.01, min(0.99, raw_reward))
-                        
-            test_passed = (passed_count == total_tests and total_tests > 0)
-            is_done = test_passed 
+            total = len(test_cases)
+            reward = max(0.1, min(0.9, float(passed_count)/total if total > 0 else 0))
+            test_passed = (passed_count == total and total > 0)
+            is_done = test_passed
             
-            if test_passed:
-                reward = 0.99  # Strictly locked to maximum ceiling
-                final_feedback = f"SUCCESS! All {total_tests} tests passed."
-            else:
-                final_feedback = f"Partial Success. Passed {passed_count}/{total_tests} tests. Errors:{error_feedback}"
-                    
-        else:
-            final_feedback = f"Invalid action command. Must be 'WRITE' or 'TEST'."
+            final_feedback = f"Result: {passed_count}/{total} tests passed."
+            if failed_logs:
+                final_feedback += "\nIssues to fix:\n- " + "\n- ".join(failed_logs[:3])
+            
+            # 3. MEMORY RETENTION
+            if not is_done:
+                final_feedback += f"\n\nCURRENT CODE TO FIX:\n{self.current_code}"
 
-        self.history_log.append(f"[Step {self.current_step}] Observation: {final_feedback}")
-
-        if not is_done and self.current_step >= self.dynamic_max_steps:
+        if not is_done and self.current_step >= self.current_task.get("max_steps", 10):
             is_done = True
-            self.history_log.append("STATUS: Maximum steps reached. Terminating early.")
+            
+        return DebugObservation(feedback=final_feedback, test_passed=test_passed, reward=reward, done=is_done, metadata={"code": self.current_code})
 
-        return DebugObservation(
-            feedback=final_feedback,
-            test_passed=test_passed,
-            reward=reward,
-            done=is_done, 
-            metadata={
-                "code": self.current_code,
-                "trajectory": "\n".join(self.history_log)
-            }
-        )
+    def state(self) -> Dict[str, Any]:
+        return {"task_id": self.current_task_id, "current_code": self.current_code, "step": self.current_step}
