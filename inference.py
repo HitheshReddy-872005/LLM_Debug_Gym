@@ -11,9 +11,25 @@ from models import DebugAction, DebugObservation
 from types import SimpleNamespace
 
 load_dotenv()
+
+# --- HUGGING FACE URL FIX ---
+def fix_hf_url(url: str) -> str:
+    """Converts standard Hugging Face Space URLs to Direct URLs for WebSockets."""
+    if url and "huggingface.co/spaces/" in url:
+        parts = url.split("huggingface.co/spaces/")[-1].strip("/").split("/")
+        if len(parts) >= 2:
+            username = parts[0]
+            space_name = parts[1]
+            return f"https://{username}-{space_name}.hf.space"
+    return url
+
 HF_TOKEN = os.getenv("HF_TOKEN")
 MODEL_NAME = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
-ENV_URL = os.getenv("ENV_URL", "https://HitheshReddy-llm-debug-gym.hf.space")
+
+# Grab the raw URL and immediately translate it using the fix
+RAW_ENV_URL = os.getenv("ENV_URL", "http://localhost:8000")
+ENV_URL = fix_hf_url(RAW_ENV_URL)
+
 STAGES = ["task_easy", "task_medium", "task_hard"]
 
 class LLMDebugClient(EnvClient[DebugAction, DebugObservation, State]):
@@ -47,19 +63,15 @@ async def run_stage(env, client, task_id):
         if res.done: break
         
         prompt = f"""You are an automated code-fixing API. Do not converse.
-
 ENVIRONMENT FEEDBACK:
 {current_feedback}
-
 INSTRUCTIONS:
 1. Do NOT write your own test cases. Do not write `assert` statements.
 2. Do NOT explain your logic.
-
 If you want to UPDATE the code, output ONLY a markdown block:
 {md_ticks}python
 # your fixed function here
 {md_ticks}
-
 If you have updated the code and want to TEST it, output EXACTLY this word and nothing else:
 TEST
 """
@@ -101,6 +113,8 @@ async def main() -> None:
         sys.exit(1)
 
     client = OpenAI(base_url="https://router.huggingface.co/v1", api_key=HF_TOKEN)
+    
+    print(f"Initializing EnvClient with URL: {ENV_URL}")
     agent_client = LLMDebugClient(base_url=ENV_URL)
     agent_client.message_timeout = 60.0
 
