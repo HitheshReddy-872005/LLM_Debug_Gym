@@ -13,7 +13,7 @@ from types import SimpleNamespace
 load_dotenv()
 HF_TOKEN = os.getenv("HF_TOKEN")
 MODEL_NAME = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
-ENV_URL = os.getenv("ENV_URL", "http://localhost:8000")
+ENV_URL = os.getenv("ENV_URL", "https://HitheshReddy-llm-debug-gym.hf.space")
 STAGES = ["task_easy", "task_medium", "task_hard"]
 
 class LLMDebugClient(EnvClient[DebugAction, DebugObservation, State]):
