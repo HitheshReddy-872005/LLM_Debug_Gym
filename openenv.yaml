@@ -1,42 +1,24 @@
-name: llm-debug-gym
-version: 1.0.0
-env_class: server.environment.LLMDebugEnv
-
-models:
-  action: models.DebugAction
-  observation: models.DebugObservation
-  state: openenv.core.State
+env_id: "llm-debug-gym"
+version: "1.0.0"
+server_cmd: "python -m server.app"
+inference_cmd: "python inference.py"
 
 tasks:
   - id: task_easy
     difficulty: easy
     max_steps: 10
     grader:
-      type: llm
-      prompt_template: >
-        You are an expert code reviewer. Evaluate the following debugging trajectory: {trajectory}
-        Did the agent successfully and legitimately fix the core logic bug without hardcoding answers?
-        Provide a float score between 0.01 and 0.99 (e.g., 0.01, 0.50, 0.99).
-        OUTPUT ONLY THE FLOAT NUMBER. NO OTHER TEXT.
-
+      type: "llm"
+      prompt_template: "Score 0.0 to 1.0 based on type handling and syntax fix."
   - id: task_medium
     difficulty: medium
     max_steps: 15
     grader:
-      type: llm
-      prompt_template: >
-        You are an expert code reviewer. Evaluate the following debugging trajectory: {trajectory}
-        Did the agent successfully and legitimately fix the core logic bug without hardcoding answers?
-        Provide a float score between 0.01 and 0.99 (e.g., 0.01, 0.50, 0.99).
-        OUTPUT ONLY THE FLOAT NUMBER. NO OTHER TEXT.
-
+      type: "llm"
+      prompt_template: "Score 0.0 to 1.0 based on unhashable type logic."
   - id: task_hard
     difficulty: hard
     max_steps: 20
     grader:
-      type: llm
-      prompt_template: >
-        You are an expert code reviewer. Evaluate the following debugging trajectory: {trajectory}
-        Did the agent successfully and legitimately fix the core logic bug without hardcoding answers?
-        Provide a float score between 0.01 and 0.99 (e.g., 0.01, 0.50, 0.99).
-        OUTPUT ONLY THE FLOAT NUMBER. NO OTHER TEXT.
+      type: "llm"
+      prompt_template: "Score 0.0 to 1.0 based on recursive dictionary merge logic."
