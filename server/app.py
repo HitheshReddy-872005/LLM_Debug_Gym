@@ -2,19 +2,21 @@ import time
 import asyncio
 import uvicorn
 import gradio as gr
+import os
+import sys
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.encoders import jsonable_encoder
 
-# Internal imports based on your project structure
+# Ensure root imports work
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from server.environment import LLMDebugEnv
 from models import DebugAction
 
 # --- GLOBAL STATE ---
 env = LLMDebugEnv()
 activity_logs = []
-
-# Global state for the Gradio UI polling
 current_ui_state = {
     "task": "Waiting for Agent to connect...",
     "initial_code": "# Original buggy code will appear here...",
@@ -24,203 +26,147 @@ current_ui_state = {
 def add_log(message: str):
     timestamp = time.strftime("%H:%M:%S")
     activity_logs.append(f"[{timestamp}] {message}")
-    if len(activity_logs) > 20:
+    if len(activity_logs) > 20: 
         activity_logs.pop(0)
 
-# --- THE DEEP EXTRACTION & STRING SPLITTER LOGIC ---
 def update_ui_state(obs, is_reset=False):
-    """Unpacks models and extracts bundled task/code strings."""
-    
-    # 1. Convert to dictionary
-    if hasattr(obs, "model_dump"):
-        data = obs.model_dump()
-    elif hasattr(obs, "dict"):
-        data = obs.dict()
-    elif isinstance(obs, dict):
-        data = obs
-    else:
-        try:
-            data = vars(obs)
-        except:
-            data = {}
-
+    data = obs.model_dump() if hasattr(obs, "model_dump") else (obs if isinstance(obs, dict) else vars(obs))
     metadata = data.get("metadata", {}) or {}
 
-    task_text = None
-    extracted_code = data.get("code") or metadata.get("code")
+    task_text = metadata.get("task")
+    extracted_code = metadata.get("code")
 
-    # 2. Check standard keys first
-    for key in ["task", "instruction", "description", "prompt", "challenge"]:
-        if data.get(key): task_text = data.get(key)
-        elif metadata.get(key): task_text = metadata.get(key)
-
-    # 3. Handle bundled "TASK:" and "CODE:" strings on reset
-    if is_reset:
+    if is_reset and not task_text:
         feedback_str = str(data.get("feedback", ""))
-        
-        # If the environment combines them into one string:
         if "TASK:" in feedback_str and "CODE:" in feedback_str:
             parts = feedback_str.split("CODE:")
             task_text = parts[0].replace("TASK:", "").strip()
             extracted_code = parts[1].strip()
-            
-        elif not task_text and feedback_str:
-            task_text = feedback_str
 
-    # 4. Only overwrite task if new one found, or if reset failed to find one
-    if task_text:
-        current_ui_state["task"] = str(task_text)
-    elif is_reset:
-        current_ui_state["task"] = f"⚠️ Task hidden. Data keys: {list(data.keys())}"
-
-    # 5. Only update initial code on reset
+    if task_text: current_ui_state["task"] = str(task_text)
     if extracted_code:
-        if is_reset:
-            current_ui_state["initial_code"] = str(extracted_code)
+        if is_reset: current_ui_state["initial_code"] = str(extracted_code)
         current_ui_state["current_code"] = str(extracted_code)
 
-
-# --- UNIVERSAL STEP PARSER ---
-def parse_env_step(step_result):
-    if isinstance(step_result, tuple):
-        if len(step_result) >= 5:
-            obs, reward, term, trunc, info = step_result[:5]
-            return obs, float(reward), bool(term or trunc), info
-        elif len(step_result) == 4:
-            obs, reward, done, info = step_result
-            return obs, float(reward), bool(done), info
-            
-    elif isinstance(step_result, dict):
-        obs = step_result.get("observation", step_result)
-        passed = step_result.get("test_passed", False)
-        reward = step_result.get("reward", 1.0 if passed else 0.0)
-        done = step_result.get("done", passed)
-        return obs, float(reward), bool(done), step_result.get("info", {})
-    
-    obs = step_result
-    passed = getattr(obs, "test_passed", False)
-    reward = getattr(obs, "reward", 1.0 if passed else 0.0)
-    done = getattr(obs, "done", passed)
-    return obs, float(reward), bool(done), {}
+def parse_env_step(raw_result):
+    if isinstance(raw_result, tuple):
+        obs, reward, done, info = raw_result[:4]
+    else:
+        obs = raw_result
+        passed = getattr(obs, "test_passed", False)
+        reward = getattr(obs, "reward", 1.0 if passed else 0.0)
+        done = getattr(obs, "done", passed)
+        info = {}
+    return obs, float(reward), bool(done), info
 
 # --- FASTAPI SETUP ---
 app = FastAPI(title="LLM Debug Gym Server")
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# --- OPENENV PROTOCOL WEBSOCKET HANDLER ---
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     add_log("🔌 Agent connected via WebSocket.")
+    
+    def find_task_id(d):
+        if isinstance(d, dict):
+            if "task_id" in d: return d["task_id"]
+            for v in d.values():
+                res = find_task_id(v)
+                if res: return res
+        return None
+
     try:
         while True:
-            request = await websocket.receive_json()
-            req_type = request.get("type", "unknown")
-            add_log(f"📥 Protocol Action: {req_type}")
-            
-            if req_type == "handshake":
-                await websocket.send_json({
-                    "type": "handshake", 
-                    "data": {"status": "connected"}
-                })
-            
-            elif req_type == "reset":
-                add_log("🔄 Environment Reset initiated by Agent.")
-                obs = env.reset()
-                update_ui_state(obs, is_reset=True)
+            try:
+                request = await websocket.receive_json()
+                req_type = request.get("type", "unknown")
                 
-                # ⏳ PAUSE 1: Give user time to read the new task
-                await asyncio.sleep(2)
+                if req_type == "handshake":
+                    await websocket.send_json({"type": "handshake", "data": {"status": "connected"}})
                 
-                await websocket.send_json({
-                    "type": "reset",
-                    "data": {
-                        "observation": jsonable_encoder(obs),
-                        "reward": 0.01,
-                        "done": False,
-                        # 🛠️ THE FIX: Add the task_id here so the Validator can count tasks
-                        "info": {"task_id": f"task_{env.current_task_index}"}
-                    }
-                })
-            
-            elif req_type == "step":
-                action_data = request.get("data", {})
-                action = DebugAction(**action_data)
-                add_log(f"🤖 AI Action: {action.command}")
-                
-                if action.command == "WRITE":
-                    snippet = action.content.strip()[:50].replace("\n", " ")
-                    add_log(f"📝 Writing Code: {snippet}...")
-                    current_ui_state["current_code"] = action.content.strip()
+                elif req_type == "reset":
+                    req_task_id = find_task_id(request) or os.environ.get("TASK_ID")
                     
-                    # ⏳ PAUSE 2: Give user time to read the AI's code edits
-                    await asyncio.sleep(3)
+                    if not req_task_id:
+                        raise ValueError("No TASK_ID found in client payload.")
+                        
+                    add_log(f"🔄 Resetting to: {req_task_id}")
+                    obs = env.reset(options={"task_id": req_task_id})
+                    update_ui_state(obs, is_reset=True)
+                    await asyncio.sleep(2)
                     
-                raw_result = env.step(action)
-                obs, reward, done, info = parse_env_step(raw_result)
-                update_ui_state(obs, is_reset=False)
+                    await websocket.send_json({
+                        "type": "reset",
+                        "data": {
+                            "observation": jsonable_encoder(obs),
+                            "reward": 0.1,
+                            "done": False,
+                            "info": {"task_id": env.current_task_id}
+                        }
+                    })
 
-                # 🛠️ Only log a Pass/Fail result if the action was TEST
-                if action.command == "TEST":
-                    if done:
-                        status = "✅ SUCCESS"
-                    elif reward > 0.05: # Greater than clamped minimum
-                        status = "🔄 PARTIAL"
-                    else:
-                        status = "❌ FAILED"
-                    add_log(f"📊 Result: {status} | Reward: {reward:.2f}")
-                elif action.command == "WRITE":
-                    add_log("💾 Code saved to environment (Pending TEST)")
-                
-                # The Victory Banner (Only appended if completely done)
-                if done and "✅ TASK IS SUCCESSFUL" not in current_ui_state["task"]:
-                    current_ui_state["task"] = f"✅ TASK IS SUCCESSFUL! The AI solved the challenge.\n\n---\n\n{current_ui_state['task']}"
-                
-                await websocket.send_json({
-                    "type": "step",
-                    "data": {
-                        "observation": jsonable_encoder(obs),
-                        "reward": reward,
-                        "done": done,
-                        "info": jsonable_encoder(info)
-                    }
-                })
-                
-            else:
-                await websocket.send_json({
-                    "type": req_type,
-                    "data": {"status": "ok"}
-                })
-                
+                elif req_type == "step":
+                    action_data = request.get("data", request)
+                    action = DebugAction(**action_data)
+                    add_log(f"🤖 AI Action: {action.command}")
+                    
+                    if action.command == "WRITE":
+                        current_ui_state["current_code"] = action.content.strip()
+                        await asyncio.sleep(1.5)
+                    
+                    raw_result = env.step(action)
+                    obs, reward, done, info = parse_env_step(raw_result)
+                    update_ui_state(obs, is_reset=False)
+                    
+                    if action.command == "TEST":
+                        test_passed = getattr(obs, "test_passed", False)
+                        if test_passed:
+                            status = "✅ SUCCESS"
+                        elif reward > 0.2:
+                            status = "🔄 PARTIAL"
+                        else:
+                            status = "❌ FAILED"
+                        add_log(f"📊 Result: {status} | Reward: {reward:.2f}")
+
+                    if getattr(obs, "test_passed", False) and "✅ TASK IS SUCCESSFUL" not in current_ui_state["task"]:
+                        current_ui_state["task"] = f"✅ TASK IS SUCCESSFUL!\n\n---\n\n{current_ui_state['task']}"
+
+                    await websocket.send_json({
+                        "type": "step",
+                        "data": {"observation": jsonable_encoder(obs), "reward": reward, "done": done, "info": jsonable_encoder(info)}
+                    })
+                    
+            except WebSocketDisconnect:
+                raise
+            except Exception as inner_e:
+                add_log(f"⚠️ Action Error: {inner_e}")
+                try:
+                    await websocket.send_json({"type": "error", "error": str(inner_e)})
+                except:
+                    pass 
+                    
     except WebSocketDisconnect:
-        add_log("🔌 Agent disconnected.")
+        add_log("🔌 Agent disconnected (Moving to next task or finished).")
     except Exception as e:
-        add_log(f"⚠️ WS Error: {str(e)}")
+        add_log(f"⚠️ Critical WS Error: {str(e)}")
 
-
-# --- REST API ENDPOINTS ---
 @app.post("/reset")
-async def reset():
-    add_log("🔄 REST Environment Reset.")
-    obs = env.reset()
+async def reset(request: Request):
+    payload = await request.json()
+    
+    def find_task_id(d):
+        if isinstance(d, dict):
+            if "task_id" in d: return d["task_id"]
+            for v in d.values():
+                res = find_task_id(v)
+                if res: return res
+        return None
+        
+    t_id = find_task_id(payload)
+    obs = env.reset(options={"task_id": t_id})
     update_ui_state(obs, is_reset=True)
-    
-    # 🛠️ THE FIX: Add the task_id here so the Validator can count tasks
-    info = {"task_id": f"task_{env.current_task_index}"}
-    
-    return {
-        "observation": jsonable_encoder(obs), 
-        "reward": 0.01, 
-        "done": False, 
-        "info": info
-    }
+    return {"observation": jsonable_encoder(obs), "reward": 0.1, "done": False, "info": {"task_id": env.current_task_id}}
 
 @app.post("/step")
 async def step(request: Request):
@@ -228,83 +174,39 @@ async def step(request: Request):
     action = DebugAction(**payload)
     if action.command == "WRITE":
         current_ui_state["current_code"] = action.content.strip()
-        
+    
     raw_result = env.step(action)
     obs, reward, done, info = parse_env_step(raw_result)
     update_ui_state(obs, is_reset=False)
     
-    # The Victory Banner (Only appended if completely done)
-    if done and "✅ TASK IS SUCCESSFUL" not in current_ui_state["task"]:
-        current_ui_state["task"] = f"✅ TASK IS SUCCESSFUL! The AI solved the challenge.\n\n---\n\n{current_ui_state['task']}"
+    if getattr(obs, "test_passed", False) and "✅ TASK IS SUCCESSFUL" not in current_ui_state["task"]:
+        current_ui_state["task"] = f"✅ TASK IS SUCCESSFUL!\n\n---\n\n{current_ui_state['task']}"
         
     return {"observation": jsonable_encoder(obs), "reward": reward, "done": done, "info": jsonable_encoder(info)}
 
-
-# --- GRADIO FRONTEND ---
-def get_live_logs():
-    if not activity_logs:
-        return "Waiting for Agent activity..."
-    return "\n".join(reversed(activity_logs))
-
-def get_current_task():
-    return current_ui_state["task"]
-
-def get_initial_code():
-    return current_ui_state["initial_code"]
-
-def get_current_code():
-    return current_ui_state["current_code"]
-
-with gr.Blocks(theme=gr.themes.Soft()) as demo:
+# --- GRADIO UI ---
+with gr.Blocks(title="LLM Debug Gym") as demo:
     gr.Markdown("# 🤖 LLM Debug Gym - Live Monitor")
     
     with gr.Row():
         with gr.Column(scale=2):
-            gr.Markdown("### 🖥️ Task Environment")
-            task_display = gr.Textbox(
-                label="Current Task Description", 
-                value=get_current_task, 
-                every=1, 
-                interactive=False
-            )
-            
+            task_display = gr.Textbox(label="Current Task Description", interactive=False)
             with gr.Row():
-                initial_code_display = gr.Code(
-                    label="Original Buggy Code", 
-                    language="python", 
-                    value=get_initial_code, 
-                    every=1, 
-                    interactive=False
-                )
-                live_code_display = gr.Code(
-                    label="AI's Live Code State", 
-                    language="python", 
-                    value=get_current_code, 
-                    every=1, 
-                    interactive=False
-                )
-            
-            with gr.Row():
-                reset_btn = gr.Button("Manual Reset", variant="secondary")
-
+                initial_code_display = gr.Code(label="Original Buggy Code", language="python", interactive=False)
+                live_code_display = gr.Code(label="AI's Live Code State", language="python", interactive=False)
         with gr.Column(scale=1):
-            gr.Markdown("### 📡 Live Agent Activity")
-            log_viewer = gr.Textbox(
-                label="Real-time Logs",
-                value=get_live_logs,
-                every=1,
-                lines=20,
-                interactive=False
-            )
-            
-    def ui_reset():
-        obs = env.reset()
-        activity_logs.clear()
-        add_log("🔄 Manual Reset from Web UI.")
-        update_ui_state(obs, is_reset=True)
+            log_viewer = gr.Textbox(label="Real-time Logs", lines=20, interactive=False)
 
-    reset_btn.click(ui_reset)
+    demo.queue() 
+    
+    def refresh_ui():
+        return current_ui_state["task"], current_ui_state["initial_code"], current_ui_state["current_code"], "\n".join(reversed(activity_logs))
+    
+    refresh_timer = gr.Timer(1.0)
+    refresh_timer.tick(refresh_ui, outputs=[task_display, initial_code_display, live_code_display, log_viewer])
+    demo.load(refresh_ui, outputs=[task_display, initial_code_display, live_code_display, log_viewer])
 
+demo.theme = gr.themes.Soft()
 app = gr.mount_gradio_app(app, demo, path="/")
 
 def main():
