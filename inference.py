@@ -1,138 +1,113 @@
 import asyncio
 import os
 import re
-import textwrap
-from typing import List, Optional
-from types import SimpleNamespace 
+import sys
+import time
 from dotenv import load_dotenv
 from openai import OpenAI
 from openenv.core.env_client import EnvClient
 from openenv.core import State
 from models import DebugAction, DebugObservation
+from types import SimpleNamespace
 
-# 1. Load configuration
-load_dotenv() 
-
-API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
-MODEL_NAME = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
+load_dotenv()
 HF_TOKEN = os.getenv("HF_TOKEN")
-# Default to localhost to prevent proxy timeouts during LLM generations
-ENV_URL = os.getenv("ENV_URL", "http://localhost:8000") 
+MODEL_NAME = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
+ENV_URL = os.getenv("ENV_URL", "http://localhost:8000")
+STAGES = ["task_easy", "task_medium", "task_hard"]
 
-# 2. Concrete Client Implementation
 class LLMDebugClient(EnvClient[DebugAction, DebugObservation, State]):
-    def _step_payload(self, action: DebugAction) -> dict:
+    def _step_payload(self, action: DebugAction) -> dict: 
         return action.model_dump()
-
+        
     def _parse_result(self, payload: dict):
+        if "error" in payload:
+            print(f"SERVER ERROR: {payload['error']}")
+            sys.exit(1)
         return SimpleNamespace(
             observation=DebugObservation(**payload["observation"]),
-            reward=payload.get("reward", 0.01),
+            reward=payload.get("reward", 0.1),
             done=payload.get("done", False)
         )
-
-    def _parse_state(self, payload: dict) -> State:
+        
+    def _parse_state(self, payload: dict) -> State: 
         return State(**payload)
 
-# 3. Logging Functions (Strictly formatted for Validator)
-def log_start(task: str, env: str, model: str) -> None:
-    print(f"[START] task={task} env={env} model={model}", flush=True)
-
-def log_step(step: int, action: str, reward: float, done: bool, error: Optional[str]) -> None:
-    error_val = error if error else "null"
-    done_val = str(done).lower()
-    print(f"[STEP] step={step} action={action} reward={reward:.2f} done={done_val} error={error_val}", flush=True)
-
-def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> None:
-    rewards_str = ",".join(f"{r:.2f}" for r in rewards)
+async def run_stage(env, client, task_id):
+    print(f"[START] task={task_id} env=llm-debug-gym model={MODEL_NAME}")
     
-    # Final layer of safety for the log output to keep it strictly (0, 1)
-    clamped_score = max(0.01, min(0.99, score))
-        
-    print(f"[END] success={str(success).lower()} steps={steps} score={clamped_score:.3f} rewards={rewards_str}", flush=True)
-
-def parse_llm_response(text: str):
-    text_upper = text.upper()
+    res = env.reset(options={"task_id": task_id})
+    current_feedback = res.observation.feedback
+    steps_taken = 0
     
-    # 1. Prioritize WRITE. If the LLM wrote code, we must capture it!
-    if "ACTION: WRITE" in text_upper:
-        # Split using the original text to preserve case sensitivity in the code
-        parts = re.split(r"CODE:\s*", text, flags=re.IGNORECASE)
-        code = parts[-1].strip() if len(parts) > 1 else text
+    # Workaround to avoid literal triple-backticks breaking the UI parser
+    md_ticks = "`" * 3
+    
+    for step in range(1, 21): 
+        if res.done: break
         
-        # UI-Safe markdown backtick stripping
-        ticks = "`" * 3
-        if ticks in code:
-            pattern = ticks + r"(?:python)?\n?(.*?)\n?" + ticks
-            match = re.search(pattern, code, re.DOTALL)
+        prompt = f"""You are an automated code-fixing API. Do not converse.
+
+ENVIRONMENT FEEDBACK:
+{current_feedback}
+
+INSTRUCTIONS:
+1. Do NOT write your own test cases. Do not write `assert` statements.
+2. Do NOT explain your logic.
+
+If you want to UPDATE the code, output ONLY a markdown block:
+{md_ticks}python
+# your fixed function here
+{md_ticks}
+
+If you have updated the code and want to TEST it, output EXACTLY this word and nothing else:
+TEST
+"""
+        
+        chat = client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        
+        llm_text = chat.choices[0].message.content.strip()
+        
+        # IRONCLAD PARSER
+        if llm_text == "TEST" or "ACTION: TEST" in llm_text.upper():
+            cmd = "TEST"
+            code = ""
+        else:
+            cmd = "WRITE"
+            # Using regex specific quantifier to avoid literal backticks
+            match = re.search(r"`{3}(?:python)?\n?(.*?)\n?`{3}", llm_text, re.DOTALL | re.IGNORECASE)
             if match:
                 code = match.group(1).strip()
             else:
-                code = code.replace(ticks + "python", "").replace(ticks, "").strip()
+                code = llm_text.strip() # ultimate fallback
                 
-        return "WRITE", code
-
-    # 2. If it didn't write code, check if it wants to test
-    elif "ACTION: TEST" in text_upper:
-        return "TEST", ""
+        res = env.step(DebugAction(command=cmd, content=code))
+        current_feedback = res.observation.feedback
+        steps_taken = step
         
-    # 3. Smart Fallback: If the LLM forgot the "ACTION:" keyword but still wrote a Python block
-    if "```python" in text.lower():
-        match = re.search(r"```python\n?(.*?)\n?```", text, flags=re.DOTALL | re.IGNORECASE)
-        if match:
-            return "WRITE", match.group(1).strip()
+        print(f"[STEP] step={step} action={cmd} reward={res.reward:.2f} done={str(res.done).lower()}")
 
-    # 4. Ultimate fallback
-    return "TEST", ""
+    # Log the END tag immediately for this specific task
+    print(f"[END] task={task_id} score={res.reward:.2f} steps={steps_taken}\n")
+    
+    return {"id": task_id, "score": res.reward, "steps": steps_taken}
 
 async def main() -> None:
     if not HF_TOKEN:
-        print("Error: HF_TOKEN not found. Check your secrets or .env file.")
-        return
+        print("HF_TOKEN missing. Ensure it is set in your .env file or environment.")
+        sys.exit(1)
 
-    ai_client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
-    
-    print(f"DEBUG: Attempting to connect to -> {ENV_URL}")
-    with LLMDebugClient(base_url=ENV_URL).sync() as env:
-        
-        rewards: List[float] = []
-        steps_taken = 0
-        success = False
+    client = OpenAI(base_url="https://router.huggingface.co/v1", api_key=HF_TOKEN)
+    agent_client = LLMDebugClient(base_url=ENV_URL)
+    agent_client.message_timeout = 60.0
 
-        log_start(task="debug-challenge", env="llm-debug-gym", model=MODEL_NAME)
-
-        try:
-            res = env.reset()
-            current_feedback = res.observation.feedback
-
-            for step in range(1, 11):
-                completion = ai_client.chat.completions.create(
-                    model=MODEL_NAME,
-                    messages=[
-                        {"role": "system", "content": "You are an expert Python debugger. Fix the code. Format: ACTION: WRITE CODE: <Full code if WRITE> or ACTION: TEST"},
-                        {"role": "user", "content": f"Feedback: {current_feedback}"},
-                    ]
-                )
-                
-                cmd, code = parse_llm_response(completion.choices[0].message.content or "")
-
-                res = env.step(DebugAction(command=cmd, content=code))
-                
-                rewards.append(res.reward)
-                steps_taken = step
-                current_feedback = res.observation.feedback
-                
-                log_step(step=step, action=cmd, reward=res.reward, done=res.done, error=None)
-
-                if res.done:
-                    success = res.observation.test_passed
-                    break
-
-        except Exception as e:
-            print(f"Error during execution: {e}")
-        finally:
-            final_score = rewards[-1] if rewards else 0.01
-            log_end(success=success, steps=steps_taken, score=final_score, rewards=rewards)
+    with agent_client.sync() as env:
+        for task_id in STAGES:
+            time.sleep(2) 
+            await run_stage(env, client, task_id)
 
 if __name__ == "__main__":
     asyncio.run(main())
