@@ -4,7 +4,7 @@ import uvicorn
 import gradio as gr
 import os
 import sys
-import json  # Added json import here!
+import json
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.encoders import jsonable_encoder
@@ -154,7 +154,6 @@ async def websocket_endpoint(websocket: WebSocket):
 
 @app.post("/reset")
 async def reset(request: Request):
-    # Safely handle empty JSON payloads from Hackathon validators
     try:
         payload = await request.json()
     except json.JSONDecodeError:
@@ -169,13 +168,18 @@ async def reset(request: Request):
         return None
         
     t_id = find_task_id(payload)
+    
+    # --- FALLBACK TASK ID LOGIC ---
+    if not t_id:
+        # IMPORTANT: Replace the string below with a valid task ID from your environment
+        t_id = os.environ.get("TASK_ID", "task_easy")
+        
     obs = env.reset(options={"task_id": t_id})
     update_ui_state(obs, is_reset=True)
     return {"observation": jsonable_encoder(obs), "reward": 0.1, "done": False, "info": {"task_id": env.current_task_id}}
 
 @app.post("/step")
 async def step(request: Request):
-    # Safely handle empty JSON payloads from Hackathon validators
     try:
         payload = await request.json()
     except json.JSONDecodeError:
